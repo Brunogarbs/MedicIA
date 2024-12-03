@@ -4,28 +4,25 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sklearn.metrics import accuracy_score, classification_report
 from decouple import config
 import re
-import psycopg2
+import pyodbc
 import spacy
 import joblib
-from datetime import datetime
 
-# Obter a data atual
-data_atendimento = datetime.now()
+# Configurações do banco de dados usando o arquivo .env
+server = config("SERVER")
+database = config("DATABASE")
+username = config("USERNAME")
+password = config("PASSWORD")
 
 # Função para conectar ao banco de dados
 def conectar_banco():
     try:
-        # Dados da conexão
-        conexao = psycopg2.connect(
-            dbname="MedicDB",    # Nome do banco de dados
-            user="postgres",    # Usuário do banco
-            password="dK7JKtOFOnaVTKHf",  # Senha do banco
-            host="elusively-concrete-boxer.data-1.use1.tembo.io",       # Host (ex.: localhost ou endereço do servidor)
-            port="5432"            # Porta do PostgreSQL (geralmente 5432)
+        conexao = pyodbc.connect(
+            f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};UID={username};PWD={password}'
         )
         print("Conexão ao banco de dados estabelecida com sucesso.")
         return conexao
-    except psycopg2.Error as erro:
+    except pyodbc.Error as erro:
         print(f"Erro ao conectar ao banco de dados: {erro}")
         return None
 
@@ -33,8 +30,9 @@ def conectar_banco():
 conexao = conectar_banco()
 
 # Acesso a API do Telegram
-bot = telebot.TeleBot('7532292572:AAFU9oBVcGGrQ3VOsEmUW-eLPAJGMPGBWtM')
-grupo_id = '-1002358397560'#ID Grupo
+TOKEN = config("TOKEN_BOT")
+bot = telebot.TeleBot(TOKEN)
+grupo_id = config("GRUPO") #ID Grupo
 
 # Dicionário para armazenar dados temporários dos usuários
 user_data = {}
@@ -150,6 +148,7 @@ def armazenar_nome(message):
 
 def valida_maior_de_idade(message):
     user_id = message.from_user.id
+    time.sleep(2)
     try:
         idade = int(message.text)
         user_data[user_id]['idade'] = idade
@@ -174,7 +173,7 @@ def responsavel(message):
     user_id = message.from_user.id
     nome_responsavel = extrair_nome(message.text)
     user_data[user_id]['responsavel'] = nome_responsavel  # Armazenando o nome do responsável
-
+    time.sleep(2)
     bot.send_message(message.chat.id, f"Obrigado. O responsável informado é: *{nome_responsavel}*.",parse_mode="Markdown")
     time.sleep(2)
     bot.send_message(message.chat.id, "Qual é o parentesco do responsável com você?")
@@ -184,6 +183,8 @@ def parentesco_responsavel(message):
     user_id = message.from_user.id
     parentesco = message.text
     user_data[user_id]['parentesco'] = parentesco  # Armazenando o parentesco
+
+    time.sleep(2)
 
     bot.send_message(message.chat.id, f"Obrigado. O responsável é: *{user_data[user_id]['responsavel']}*, e o parentesco é: *{parentesco}*. Agora, vamos coletar mais informações.",parse_mode="Markdown")
     
@@ -197,20 +198,32 @@ def parentesco_responsavel(message):
     bot.send_message(message.chat.id, "Por favor, selecione seu gênero:", reply_markup=markup)  # Chama a função para coletar gênero
 
 def contato_emergencia(message):
+    time.sleep(2)
     bot.send_message(message.chat.id, "Por favor, informe o *NOME* do seu contato de emergência.",parse_mode="Markdown")
     bot.register_next_step_handler(message, telefone_contato_emergencia)
 
 def telefone_contato_emergencia(message):
     user_id = message.from_user.id
     nome_contato = extrair_nome(message.text)
+    if not nome_contato: 
+        nome_contato = "Não identificado"
     user_data[user_id]['contato_emergencia'] = {'nome': nome_contato}
-    bot.send_message(message.chat.id, "Agora, por favor, informe o *TELEFONE* do seu contato de emergência. _(ex: (11) 12345-6789)_", parse_mode="Markdown")
+    time.sleep(2)
+    bot.send_message(
+        message.chat.id, 
+        "Agora, por favor, informe o *TELEFONE* do seu contato de emergência. _(ex: (11) 12345-6789)_", 
+        parse_mode="Markdown"
+    )
+    # Registrar o próximo passo
     bot.register_next_step_handler(message, salvar_contato_emergencia)
+
 
 def salvar_contato_emergencia(message):
     user_id = message.from_user.id
     telefone = message.text.strip()
     
+    time.sleep(2)
+
     # Expressão regular para validar o telefone no formato 
     telefone_pattern = r'^\(\d{2}\)\s\d{5}-\d{4}$'
     
@@ -227,6 +240,8 @@ def salvar_contato_emergencia(message):
 def dados_sus(message):
     user_id = message.from_user.id
     num_sus = message.text
+    time.sleep(2)
+
     if len(num_sus) == 15 and num_sus.isdigit():
         user_data[user_id]['numero_sus'] = num_sus
         bot.send_message(message.chat.id, "Muito obrigado! Agora vamos verificar sua dor.")
@@ -249,8 +264,8 @@ def capturar_sintomas(message):
     # Obter previsão, tratamento e confiança
     diagnostico, tratamento, confianca = verificar_tratamento(sintomas)
 
-    print(confianca)
-    print(diagnostico)
+    print("Acuracidade:", confianca)
+    print("Possivel diagnostico:", diagnostico)
     
     if confianca <= 80.0:
         tratamento = ("Não foi possível identificar um tratamento. Consulte um médico.")
@@ -293,7 +308,7 @@ def capturar_sintomas(message):
     # Mensagem para o usuário confirmando os sintomas e o tratamento sugerido
     bot.send_message(message.chat.id, f"Você informou os seguintes sintomas: *{sintomas}.*",parse_mode="Markdown")
     time.sleep(4)
-    bot.send_message(message.chat.id, f"Aqui está um tratamento preventivo:*{tratamento}*.", parse_mode="Markdown")
+    bot.send_message(message.chat.id, f"Aqui está um tratamento preventivo: *{tratamento}*.", parse_mode="Markdown")
     time.sleep(2)
     bot.send_message(message.chat.id, "As informações foram enviadas para a classificação do médico.")
     time.sleep(2)
@@ -302,73 +317,69 @@ def capturar_sintomas(message):
 def salvar_atendimento(user_id, urgencia):
     """Salva os dados do paciente, responsável, contato de emergência e atendimento."""
     try:
-        cursor = conexao.cursor()
-        
-        # Dados do paciente
-        nome = user_data[user_id]['nome']
-        idade = user_data[user_id]['idade']
-        genero = user_data[user_id]['genero']
-        numero_sus = user_data[user_id]['numero_sus']
-        
-        # Dados do responsável (opcionais)
-        responsavel = user_data[user_id].get('responsavel', 'Não Informado')
-        parentesco = user_data[user_id].get('parentesco', 'Não Informado')
-        
-        # Dados do contato de emergência
-        contato_emergencia = user_data[user_id]['contato_emergencia']['nome']
-        telefone_emergencia = user_data[user_id]['contato_emergencia']['telefone']
-        
-        # Dados do atendimento
-        chat_id = user_data[user_id]['chat_id_inicial']
-        intensidade_dor = user_data[user_id]['intensidade_dor']
-        sintomas = user_data[user_id]['sintomas']
-        classificacao = urgencia
-        tratamento = user_data[user_id]['tratamento']
-        possivel_doenca = user_data[user_id]['diagnostico']
+        with conexao.cursor() as cursor:
+            # Dados do paciente
+            nome = user_data[user_id]['nome']
+            idade = user_data[user_id]['idade']
+            genero = user_data[user_id]['genero']
+            numero_sus = user_data[user_id]['numero_sus']
 
-        # Inserir dados do paciente
-        cursor.execute("""
-            INSERT INTO pacientes (nome, idade, genero, numero_sus)
-            VALUES (%s, %s, %s, %s);
-        """, (nome, idade, genero, numero_sus))  # Use %s como placeholder
-        
-        # Obter o ID do paciente
-        cursor.execute("SELECT currval(pg_get_serial_sequence('pacientes', 'id'));")
-        id_paciente = cursor.fetchone()[0]
+            # Dados do responsável
+            responsavel_nome = user_data[user_id].get('responsavel', "Não informado")  # Valor padrão
+            parentesco = user_data[user_id].get('parentesco', "Não informado")  # Valor padrão
 
-        # Inserir dados do responsável, se houver
-        if responsavel and parentesco:
-            cursor.execute("""
+            # Dados de contato de emergência
+            contato_nome = user_data[user_id].get('contato_emergencia', {}).get('nome', "Não identificado")
+            telefone = user_data[user_id].get('contato_emergencia', {}).get('telefone', "Não informado")
+
+
+            # Dados do atendimento
+            chat_id = user_data[user_id]['chat_id_inicial']
+            intensidade_dor = user_data[user_id]['intensidade_dor']
+            sintomas = user_data[user_id]['sintomas']
+            classificacao = urgencia
+            tratamento = user_data[user_id]['tratamento']
+            possivel_doenca = user_data[user_id]['diagnostico']
+
+            # Inserindo o paciente
+            sql_paciente = """
+                INSERT INTO Pacientes (nome, idade, genero, numero_sus)
+                OUTPUT INSERTED.id
+                VALUES (?, ?, ?, ?)
+            """
+            cursor.execute(sql_paciente, (nome, idade, genero, numero_sus))
+            paciente_id = cursor.fetchone()[0]
+
+            # Inserindo o responsável
+            sql_responsavel = """
                 INSERT INTO Responsaveis (nome, parentesco, paciente_id)
-                VALUES (%s, %s, %s);
-            """, (responsavel, parentesco, id_paciente))
-        
-        # Inserir dados do contato de emergência
-        cursor.execute("""
-            INSERT INTO ContatosEmergencia (nome, telefone, paciente_id)
-            VALUES (%s, %s, %s);
-        """, (contato_emergencia, telefone_emergencia, id_paciente))
-        
-            # SQL para inserir o atendimento e retornar o ID gerado
-        sql_atendimento = """
-            INSERT INTO Atendimentos (paciente_id, chat_id, intensidade_dor, sintomas, classificacao, 
-                                    tratamento, possivel_doenca, data_atendimento)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id;
-        """
+                VALUES (?, ?, ?)
+            """
+            cursor.execute(sql_responsavel, (responsavel_nome, parentesco, paciente_id))
 
-        # Executar o comando e recuperar o ID
-        cursor.execute(sql_atendimento, (id_paciente, chat_id, intensidade_dor, sintomas, classificacao, tratamento, possivel_doenca, data_atendimento))
-        atendimento_id = cursor.fetchone()[0]
-        # Confirmar transação
-        conexao.commit()
-        
-        return atendimento_id
+            # Inserindo o contato de emergência
+            sql_contato = """
+                INSERT INTO ContatosEmergencia (nome, telefone, paciente_id)
+                VALUES (?, ?, ?)
+            """
+            cursor.execute(sql_contato, (contato_nome, telefone, paciente_id))
+
+            # Inserindo o atendimento
+            sql_atendimento = """
+                INSERT INTO Atendimentos (paciente_id, chat_id, intensidade_dor, sintomas, classificacao, 
+                                          tratamento, possivel_doenca, data_atendimento)
+                OUTPUT INSERTED.id
+                VALUES (?, ?, ?, ?, ?, ?, ?, GETDATE())
+            """
+            cursor.execute(sql_atendimento, (paciente_id, chat_id, intensidade_dor, sintomas, classificacao, tratamento, possivel_doenca))
+            atendimento_id = cursor.fetchone()[0]
+
+            conexao.commit()
+            print("Atendimento salvo com sucesso. ID:", atendimento_id)
+            return atendimento_id
     except Exception as e:
         print(f"Erro ao salvar atendimento: {e}")
-        conexao.rollback()
         return None
-
 
 # Inicia o bot
 bot.polling()
